@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Read Clip",
+  "version": "0.1.0",
+  "description": "网页/B站/PDF 剪藏 → DeepSeek 一段话总结 → md 推到 GitHub 个人阅读库。",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Read Clip — 剪藏到阅读库",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

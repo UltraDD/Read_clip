@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="sparkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24"/>
+      <stop offset="100%" style="stop-color:#f59e0b"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background rounded square -->
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bgGrad)"/>
+  
+  <!-- Document/Page shape -->
+  <path d="M40 28 L76 28 L88 40 L88 92 C88 96 85 100 80 100 L48 100 C43 100 40 96 40 92 L40 28 Z" 
+        fill="white" opacity="0.95"/>
+  
+  <!-- Document fold -->
+  <path d="M76 28 L76 40 L88 40 Z" fill="white" opacity="0.7"/>
+  
+  <!-- Text lines on document -->
+  <rect x="50" y="50" width="28" height="4" rx="2" fill="#6366f1" opacity="0.4"/>
+  <rect x="50" y="60" width="22" height="4" rx="2" fill="#6366f1" opacity="0.4"/>
+  <rect x="50" y="70" width="26" height="4" rx="2" fill="#6366f1" opacity="0.4"/>
+  
+  <!-- Lightning bolt (quick save) -->
+  <path d="M62 42 L54 56 L60 56 L56 72 L70 54 L64 54 L68 42 Z" 
+        fill="url(#sparkGrad)"/>
+  
+  <!-- Sparkle/AI indicator (top right) -->
+  <circle cx="92" cy="36" r="14" fill="url(#sparkGrad)"/>
+  <path d="M92 28 L92 44 M84 36 L100 36" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="85" cy="29" r="2" fill="white"/>
+  <circle cx="99" cy="43" r="2" fill="white"/>
+</svg>

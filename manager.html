@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>知识库 · Read Clip</title>
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+  <div class="ambient-mesh">
+    <div class="mesh-orb orb-1"></div>
+    <div class="mesh-orb orb-2"></div>
+    <div class="mesh-orb orb-3"></div>
+  </div>
+
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <span class="logo">📎</span>
+        <span class="logo-text">Read Clip</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" id="nav-library">
+          <span class="icon">📚</span> 知识库
+        </button>
+        <button class="nav-item" id="nav-settings">
+          <span class="icon">⚙️</span> 设置
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="version">v0.1.0</div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <!-- 知识库视图 -->
+      <div id="view-library" class="view-section active">
+        <header class="content-header">
+          <div class="header-title-row">
+            <h1>知识库</h1>
+            <select id="library-filter" class="filter-select">
+              <option value="all">全部类型</option>
+              <option value="article">网页文章</option>
+              <option value="bilibili">B 站视频</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </div>
+          <div class="header-actions">
+            <span id="item-count" class="badge">0 项</span>
+          </div>
+        </header>
+
+        <div id="card-grid" class="card-grid">
+          <div class="empty-state-large">
+            <div class="empty-icon">📭</div>
+            <h3>知识库为空</h3>
+            <p>剪藏的文章会出现在这里。打开扩展点击保存按钮试试。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 设置视图 -->
+      <div id="view-settings" class="view-section">
+        <header class="content-header">
+          <h1>设置</h1>
+        </header>
+
+        <div class="settings-container">
+
+          <!-- 安全 -->
+          <section class="settings-card">
+            <div class="card-header">
+              <h3>🔐 安全与同步</h3>
+              <p>主密码加密所有 Token / API Key，通过 Chrome Sync 在设备间同步。</p>
+            </div>
+            <div class="card-body">
+              <div class="input-group">
+                <label>主密码</label>
+                <div class="row">
+                  <input type="password" id="master-pass" placeholder="输入密码以解锁/保存">
+                  <button id="btn-unlock" class="btn">解锁</button>
+                </div>
+                <div class="remember-me-row">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="remember-me" checked>
+                    <span>30 天内记住密码</span>
+                  </label>
+                  <span id="remember-status" class="remember-status"></span>
+                </div>
+                <div id="secure-status" class="status-text">检查状态中...</div>
+              </div>
+              <div class="row mt-4">
+                <button id="btn-logout" class="btn btn-danger">🚪 登出</button>
+                <button id="btn-lock" class="btn btn-text">锁定会话</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- GitHub -->
+          <section class="settings-card">
+            <div class="card-header">
+              <h3>🐙 GitHub 推送</h3>
+              <p>md 文件会用 Contents API 提交到指定仓库的对应路径。推荐 fine-grained PAT，scope 限定 contents:write。</p>
+            </div>
+            <div class="card-body">
+              <div class="row">
+                <div class="input-group">
+                  <label>Owner（用户名/组织）</label>
+                  <input type="text" id="gh-owner" placeholder="UltraDD">
+                </div>
+                <div class="input-group">
+                  <label>Repo（仓库名）</label>
+                  <input type="text" id="gh-repo" placeholder="My_life">
+                </div>
+                <div class="input-group">
+                  <label>Branch（分支）</label>
+                  <input type="text" id="gh-branch" placeholder="main">
+                </div>
+              </div>
+              <div class="input-group">
+                <label>Personal Access Token</label>
+                <input type="password" id="gh-token" placeholder="github_pat_...">
+              </div>
+              <div class="row">
+                <div class="input-group">
+                  <label>网页文章路径</label>
+                  <input type="text" id="gh-path-article" placeholder="reading/articles">
+                </div>
+                <div class="input-group">
+                  <label>B 站视频路径</label>
+                  <input type="text" id="gh-path-media" placeholder="reading/media">
+                </div>
+                <div class="input-group">
+                  <label>PDF 路径</label>
+                  <input type="text" id="gh-path-pdf" placeholder="reading/articles">
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- DeepSeek -->
+          <section class="settings-card">
+            <div class="card-header">
+              <h3>🤖 DeepSeek AI 总结</h3>
+              <p>留空则不生成 AI 速览，md 文件会标注"未生成"。</p>
+            </div>
+            <div class="card-body">
+              <div class="row">
+                <div class="input-group">
+                  <label>API Key</label>
+                  <input type="password" id="ds-key" placeholder="sk-...">
+                </div>
+                <div class="input-group">
+                  <label>Model</label>
+                  <input type="text" id="ds-model" placeholder="deepseek-chat">
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- OSS -->
+          <section class="settings-card">
+            <div class="card-header">
+              <h3>☁️ 阿里云 OSS（可选）</h3>
+              <p>用于图片转存、HTML 静态备份、PDF 原件存储。留空则跳过转存，正文图片用原始外链。</p>
+            </div>
+            <div class="card-body">
+              <div class="row">
+                <div class="input-group">
+                  <label>Region</label>
+                  <input type="text" id="oss-region" placeholder="oss-cn-guangzhou">
+                </div>
+                <div class="input-group">
+                  <label>Bucket</label>
+                  <input type="text" id="oss-bucket" placeholder="my-bucket">
+                </div>
+              </div>
+              <div class="row">
+                <div class="input-group">
+                  <label>AccessKey ID</label>
+                  <input type="password" id="oss-ak">
+                </div>
+                <div class="input-group">
+                  <label>AccessKey Secret</label>
+                  <input type="password" id="oss-sk">
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 操作区 -->
+          <section class="settings-card">
+            <div class="card-body">
+              <div class="row">
+                <button id="save-settings-btn" class="btn btn-primary">保存并加密</button>
+                <button id="test-github-btn" class="btn">测试 GitHub</button>
+                <button id="test-oss-btn" class="btn">测试 OSS</button>
+              </div>
+              <div id="log-area" class="log-box" style="display:none;"></div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="lib/aliyun-oss.js"></script>
+  <script src="lib/secure-crypto.js"></script>
+  <script src="lib/secure-settings.js"></script>
+  <script src="lib/github-client.js"></script>
+  <script src="manager.js"></script>
+</body>
+</html>
