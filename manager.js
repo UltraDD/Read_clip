@@ -45,7 +45,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnSave = document.getElementById('save-settings-btn');
   const btnTestGitHub = document.getElementById('test-github-btn');
   const btnTestOss = document.getElementById('test-oss-btn');
+  const btnSyncHistory = document.getElementById('btn-sync-history');
   const logArea = document.getElementById('log-area');
+  
+  const btnRefreshLogs = document.getElementById('btn-refresh-logs');
+  const btnClearLogs = document.getElementById('btn-clear-logs');
+  const systemLogContainer = document.getElementById('system-log-container');
 
   // ---------- 视图切换 ----------
   function switchTab(tab) {
@@ -136,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let s = await SecureSettings.getSession();
     if (!s) s = await SecureSettings.tryRestoreFromRememberMe();
     if (s) fillForm(s);
-    else fillForm(SecureSettings.emptyDraft());
+    else fillForm(await SecureSettings.emptyDraft());
   }
 
   // ---------- 解锁 / 锁定 / 登出 / 保存 ----------
@@ -156,14 +161,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnLock.addEventListener('click', async () => {
     await SecureSettings.lock();
-    fillForm(SecureSettings.emptyDraft());
+    fillForm(await SecureSettings.emptyDraft());
     setSecureStatus('🔒 已锁定会话');
   });
 
   btnLogout.addEventListener('click', async () => {
     if (!confirm('登出会清除本机记住的密码（云端加密配置仍保留）。继续？')) return;
     await SecureSettings.logout();
-    fillForm(SecureSettings.emptyDraft());
+    fillForm(await SecureSettings.emptyDraft());
     masterPass.value = '';
     setSecureStatus('已登出');
     refreshSecureStatus();
@@ -232,6 +237,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // ---------- 系统日志 ----------
+  async function refreshSystemLogs() {
+    const data = await chrome.storage.local.get('system_logs');
+    const logs = data.system_logs || [];
+    systemLogContainer.innerHTML = '';
+    
+    if (logs.length === 0) {
+      systemLogContainer.innerHTML = '<div style="padding: 10px; color: #888;">暂无日志</div>';
+      return;
+    }
+
+    logs.slice().reverse().forEach(log => {
+      const line = document.createElement('div');
+      line.className = `log-line level-${log.level}`;
+      line.style.padding = '4px 10px';
+      line.style.borderBottom = '1px solid #333';
+      
+      const time = new Date(log.timestamp).toLocaleTimeString();
+      let color = '#d4d4d4';
+      if (log.level === 'warn') color = '#cca700';
+      if (log.level === 'error') color = '#f44747';
+      
+      line.style.color = color;
+      
+      const detailStr = log.detail ? `<br/><span style="color: #888; font-size: 11px;">${escapeHtml(log.detail)}</span>` : '';
+      
+      line.innerHTML = `
+        <span style="color: #569cd6;">[${time}]</span> 
+        <span style="font-weight: bold;">${log.level.toUpperCase()}</span>: 
+        ${escapeHtml(log.message)} ${detailStr}
+      `;
+      systemLogContainer.appendChild(line);
+    });
+  }
+
+  btnRefreshLogs.addEventListener('click', refreshSystemLogs);
+  btnClearLogs.addEventListener('click', async () => {
+    if (!confirm('确定要清空所有运行日志吗？')) return;
+    await chrome.storage.local.set({ system_logs: [] });
+    refreshSystemLogs();
+  });
+
   // ---------- 知识库 ----------
   async function loadHistory() {
     const filter = libraryFilter.value;
@@ -280,6 +327,35 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
   }
 
+  // ---------- 同步历史 ----------
+  btnSyncHistory.addEventListener('click', async () => {
+    try {
+      const session = await SecureSettings.getSession();
+      if (!session) {
+        log('请先解锁配置后再同步', true);
+        return;
+      }
+      btnSyncHistory.disabled = true;
+      btnSyncHistory.textContent = '同步中...';
+      log('开始从 GitHub 同步最近 20 条记录...');
+      
+      chrome.runtime.sendMessage({ action: 'sync_github_history' }, (response) => {
+        btnSyncHistory.disabled = false;
+        btnSyncHistory.textContent = '🔄 同步 GitHub 历史';
+        if (response && response.success) {
+          log(`✅ 同步完成，新增 ${response.count} 条记录`);
+          loadHistory();
+        } else {
+          log(`❌ 同步失败：${response?.error || '未知错误'}`, true);
+        }
+      });
+    } catch (e) {
+      btnSyncHistory.disabled = false;
+      btnSyncHistory.textContent = '🔄 同步 GitHub 历史';
+      log(`❌ 同步异常：${e.message}`, true);
+    }
+  });
+
   // ---------- 初始化 ----------
   (async () => {
     try {
@@ -288,6 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await refreshSecureStatus();
     await loadFromSessionIfAny();
     await loadHistory();
+    await refreshSystemLogs();
   })();
 
   // history 变更时刷新

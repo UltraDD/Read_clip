@@ -48,6 +48,7 @@
             </select>
           </div>
           <div class="header-actions">
+            <button id="btn-sync-history" class="btn btn-text" style="margin-right: 10px;">🔄 同步 GitHub 历史</button>
             <span id="item-count" class="badge">0 项</span>
           </div>
         </header>
@@ -154,7 +155,7 @@
                 </div>
                 <div class="input-group">
                   <label>Model</label>
-                  <input type="text" id="ds-model" placeholder="deepseek-chat">
+                  <input type="text" id="ds-model" placeholder="deepseek-v4-flash">
                 </div>
               </div>
             </div>
@@ -174,7 +175,7 @@
                 </div>
                 <div class="input-group">
                   <label>Bucket</label>
-                  <input type="text" id="oss-bucket" placeholder="my-bucket">
+                  <input type="text" id="oss-bucket" placeholder="read-clip">
                 </div>
               </div>
               <div class="row">
@@ -186,6 +187,25 @@
                   <label>AccessKey Secret</label>
                   <input type="password" id="oss-sk">
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 系统日志 -->
+          <section class="settings-card">
+            <div class="card-header">
+              <div class="row" style="justify-content: space-between; align-items: center;">
+                <h3>📜 系统运行日志</h3>
+                <div class="row" style="gap: 10px;">
+                  <button id="btn-refresh-logs" class="btn btn-text">刷新</button>
+                  <button id="btn-clear-logs" class="btn btn-text btn-danger">清空</button>
+                </div>
+              </div>
+              <p>记录插件后台运行的详细步骤，用于排查“启动中”或“保存失败”等问题。</p>
+            </div>
+            <div class="card-body">
+              <div id="system-log-container" class="log-box" style="height: 300px; display: block; background: #1e1e1e; color: #d4d4d4; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px;">
+                <div style="padding: 10px; color: #888;">暂无日志</div>
               </div>
             </div>
           </section>

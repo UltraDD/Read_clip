@@ -23,3 +23,6 @@ npm-debug.log*
 *.tmp
 *.temp
 
+# Local Config (Private Keys)
+config.json
+

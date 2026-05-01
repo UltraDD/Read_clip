@@ -596,3 +596,7 @@ body {
   color: #1f2328;
   background: rgba(240, 240, 240, 0.95);
 }
+.action-btn.copy-oss {
+  color: var(--accent-color);
+  background: rgba(235, 245, 255, 0.95);
+}

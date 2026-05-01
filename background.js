@@ -40,15 +40,18 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'publish_article') {
+    logSystem('info', '开始网页剪藏流程', { title: request.payload.title, url: request.payload.original_url });
     updateProcessingState({ step: 'extract', progress: 5 });
     broadcastProgress('extract', { progress: 5 });
     handleSaveWorkflow(request.payload)
       .then((result) => {
+        logSystem('info', '剪藏成功', { title: result.title });
         updateProcessingState(null);
         broadcastProgress('complete', result);
         sendResponse({ success: true, ...result });
       })
       .catch((err) => {
+        logSystem('error', '剪藏流程失败', err.message);
         console.error('Workflow Failed:', err);
         updateProcessingState(null);
         broadcastProgress('error', { message: err.message });
@@ -58,15 +61,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'publish_bilibili') {
+    logSystem('info', '开始 B 站剪藏流程', { title: request.payload.videoInfo?.title });
     updateProcessingState({ step: 'bilibili_extract', progress: 5 });
     broadcastProgress('bilibili_extract', { progress: 5 });
     handleBilibiliWorkflow(request.payload)
       .then((result) => {
+        logSystem('info', 'B 站剪藏成功', { title: result.title });
         updateProcessingState(null);
         broadcastProgress('complete', result);
         sendResponse({ success: true, ...result });
       })
       .catch((err) => {
+        logSystem('error', 'B 站剪藏流程失败', err.message);
         console.error('Bilibili Workflow Failed:', err);
         updateProcessingState(null);
         broadcastProgress('error', { message: err.message });
@@ -76,15 +82,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'publish_pdf') {
+    logSystem('info', '开始 PDF 剪藏流程', { title: request.payload.title });
     updateProcessingState({ step: 'extract', progress: 5 });
     broadcastProgress('extract', { message: 'PDF 文件' });
     handlePdfWorkflow(request.payload)
       .then((result) => {
+        logSystem('info', 'PDF 剪藏成功', { title: result.title });
         updateProcessingState(null);
         broadcastProgress('complete', result);
         sendResponse({ success: true, ...result });
       })
       .catch((err) => {
+        logSystem('error', 'PDF 剪藏流程失败', err.message);
         console.error('PDF Workflow Failed:', err);
         updateProcessingState(null);
         broadcastProgress('error', { message: err.message });
@@ -93,12 +102,145 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'get_system_logs') {
+    chrome.storage.local.get('system_logs').then(data => {
+      sendResponse({ success: true, logs: data.system_logs || [] });
+    });
+    return true;
+  }
+
+  if (request.action === 'clear_system_logs') {
+    chrome.storage.local.set({ system_logs: [] }).then(() => {
+      sendResponse({ success: true });
+    });
+    return true;
+  }
+
   if (request.action === 'open_manager') {
     chrome.tabs.create({ url: 'manager.html' });
   }
+
+  if (request.action === 'sync_github_history') {
+    handleHistorySync()
+      .then((count) => sendResponse({ success: true, count }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
-// ============ 3. 工具：消息广播 / 状态 / 历史 ============
+// ============ 3. 工具：消息广播 / 状态 / 历史 / 日志 ============
+
+async function handleHistorySync() {
+  const settings = await SecureSettings.requireSession();
+  const paths = [
+    settings.github_path_article || 'reading/articles',
+    settings.github_path_media || 'reading/media',
+    settings.github_path_pdf || 'reading/articles'
+  ];
+  const uniquePaths = [...new Set(paths)];
+  
+  const currentHistory = (await chrome.storage.local.get('history')).history || [];
+  const existingPaths = new Set(currentHistory.map(h => h.githubPath));
+  
+  let newEntriesCount = 0;
+  const newEntries = [];
+
+  for (const path of uniquePaths) {
+    try {
+      logSystem('info', `正在同步 GitHub 路径: ${path}`);
+      const files = await GitHubClient.listDirectory({
+        owner: settings.github_owner,
+        repo: settings.github_repo,
+        branch: settings.github_branch || 'main',
+        token: settings.github_token,
+        path
+      });
+
+      // 仅处理 .md 文件且不在本地历史中的
+      const mdFiles = files.filter(f => f.name.endsWith('.md') && !existingPaths.has(f.path));
+      // 限制每次同步数量，避免请求过多
+      const toSync = mdFiles.slice(-20).reverse();
+
+      for (const file of toSync) {
+        try {
+          const content = await GitHubClient.getFileContent({
+            owner: settings.github_owner,
+            repo: settings.github_repo,
+            branch: settings.github_branch || 'main',
+            token: settings.github_token,
+            path: file.path
+          });
+
+          const entry = parseMarkdownEntry(content, file.path, file.html_url);
+          if (entry) {
+            newEntries.push(entry);
+            newEntriesCount++;
+          }
+        } catch (e) {
+          console.warn(`同步文件失败 ${file.path}:`, e.message);
+        }
+      }
+    } catch (e) {
+      console.warn(`获取路径列表失败 ${path}:`, e.message);
+    }
+  }
+
+  if (newEntries.length > 0) {
+    const updatedHistory = [...currentHistory, ...newEntries];
+    // 按时间戳排序
+    updatedHistory.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    // 保持最大数量
+    const trimmedHistory = updatedHistory.slice(-200);
+    await chrome.storage.local.set({ history: trimmedHistory });
+  }
+
+  return newEntriesCount;
+}
+
+function parseMarkdownEntry(content, repoPath, githubUrl) {
+  // 简单的 frontmatter 解析
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return null;
+
+  const fmText = fmMatch[1];
+  const getFmValue = (key) => {
+    const m = fmText.match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
+    if (!m) return '';
+    let val = m[1].trim();
+    if (val.startsWith('"') && val.endsWith('"')) {
+      val = val.slice(1, -1).replace(/\\"/g, '"').replace(/\\n/g, '\n');
+    }
+    return val;
+  };
+
+  const title = getFmValue('title');
+  const originalUrl = getFmValue('url');
+  const capturedAt = getFmValue('captured_at');
+  const ossUrl = getFmValue('oss_html');
+  const source = getFmValue('source');
+  
+  // 查找 AI 速览部分
+  let aiSummary = '';
+  const aiMatch = content.match(/## AI 速览\n\n([\s\S]*?)\n\n---/);
+  if (aiMatch) {
+    aiSummary = aiMatch[1].trim();
+    if (aiSummary.startsWith('>')) aiSummary = ''; // 过滤掉失败标注
+  }
+
+  const timestamp = capturedAt ? new Date(capturedAt).getTime() : Date.now();
+
+  return {
+    title: title || repoPath.split('/').pop().replace('.md', ''),
+    originalUrl,
+    ossUrl,
+    githubUrl,
+    githubPath: repoPath,
+    timestamp,
+    type: repoPath.includes('media') ? 'bilibili' : (repoPath.includes('pdf') ? 'pdf' : 'article'),
+    aiSummary: aiSummary || null,
+    source: source || null
+  };
+}
 
 function broadcastProgress(step, data) {
   chrome.runtime.sendMessage({
@@ -111,6 +253,22 @@ function broadcastProgress(step, data) {
 function updateProcessingState(stateObj) {
   if (stateObj) stateObj._updatedAt = Date.now();
   chrome.storage.local.set({ processingState: stateObj });
+}
+
+async function logSystem(level, message, detail = null) {
+  const logEntry = {
+    timestamp: Date.now(),
+    level, // 'info', 'warn', 'error'
+    message,
+    detail: detail ? (typeof detail === 'string' ? detail : JSON.stringify(detail)) : null
+  };
+  console.log(`[ReadClip ${level.toUpperCase()}] ${message}`, detail || '');
+  
+  const data = await chrome.storage.local.get('system_logs');
+  const logs = data.system_logs || [];
+  logs.push(logEntry);
+  if (logs.length > 200) logs.shift();
+  await chrome.storage.local.set({ system_logs: logs });
 }
 
 async function addToHistory(entry) {
@@ -136,13 +294,29 @@ async function handleSaveWorkflow(payload) {
     console.warn('[Read_clip] OSS 未配置，跳过图片转存');
   }
 
-  // 4.2 静态 HTML 备份（OSS 配了才有；当作 frontmatter 的 oss_html 字段）
+  // 4.2 提纯文本喂 DeepSeek
+  const bodyMarkdown = nodesToMarkdown(payload.content);
+  const bodyPlainText = nodesToPlainText(payload.content);
+
+  // 4.3 AI 总结
+  broadcastProgress('ai', { progress: 60, message: '正在生成 AI 总结...' });
+  updateProcessingState({ step: 'ai', progress: 60 });
+
+  const aiResult = await tryAiSummarize({
+    apiKey: settings.deepseek_api_key,
+    model: settings.deepseek_model,
+    title: payload.title,
+    url: payload.original_url,
+    bodyText: bodyPlainText
+  });
+
+  // 4.4 静态 HTML 备份（OSS 配了才有；包含 AI 总结）
   let ossUrl = '';
   if (uploader) {
     try {
-      broadcastProgress('html', { progress: 60, message: '正在上传 HTML 备份...' });
-      updateProcessingState({ step: 'html', progress: 60 });
-      const htmlContent = generateStaticHtml(payload);
+      broadcastProgress('html', { progress: 80, message: '正在上传 HTML 备份...' });
+      updateProcessingState({ step: 'html', progress: 80 });
+      const htmlContent = generateStaticHtml(payload, aiResult.summary || aiResult.error);
       const htmlBlob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
       const dateStr = SlugUtil.todayStamp().replace(/-/g, '');
       const filename = `articles/${dateStr}/${legacyFilename(payload.title)}.html`;
@@ -154,22 +328,6 @@ async function handleSaveWorkflow(payload) {
       console.warn('[Read_clip] OSS HTML 上传失败，忽略：', e.message);
     }
   }
-
-  // 4.3 提纯文本喂 DeepSeek
-  const bodyMarkdown = nodesToMarkdown(payload.content);
-  const bodyPlainText = nodesToPlainText(payload.content);
-
-  // 4.4 AI 总结
-  broadcastProgress('ai', { progress: 75, message: '正在生成 AI 总结...' });
-  updateProcessingState({ step: 'ai', progress: 75 });
-
-  const aiResult = await tryAiSummarize({
-    apiKey: settings.deepseek_api_key,
-    model: settings.deepseek_model,
-    title: payload.title,
-    url: payload.original_url,
-    bodyText: bodyPlainText
-  });
 
   // 4.5 拼装 md
   const md = MarkdownBuilder.build({
@@ -185,8 +343,8 @@ async function handleSaveWorkflow(payload) {
   });
 
   // 4.6 推 GitHub
-  broadcastProgress('github', { progress: 92, message: '正在推送到 GitHub...' });
-  updateProcessingState({ step: 'github', progress: 92 });
+  broadcastProgress('github', { progress: 95, message: '正在推送到 GitHub...' });
+  updateProcessingState({ step: 'github', progress: 95 });
 
   const filename = SlugUtil.buildFilename(payload.title, 'md');
   const repoPath = joinPath(settings.github_path_article || 'reading/articles', filename);
@@ -273,13 +431,27 @@ async function handleBilibiliWorkflow(payload) {
     }
   }
 
-  // 5.2 静态 HTML 备份
+  // 5.2 AI 总结
+  const bodyPlainText = `视频标题：${videoInfo.title}\nUP 主：${videoInfo.owner?.name}\n时长：${formatVideoDuration(videoInfo.duration)}\n\n字幕原文：\n${subtitleText}`;
+  broadcastProgress('ai', { progress: 65, message: '正在生成 AI 总结...' });
+  updateProcessingState({ step: 'ai', progress: 65 });
+
+  const aiResult = await tryAiSummarize({
+    apiKey: settings.deepseek_api_key,
+    model: settings.deepseek_model,
+    title: videoInfo.title,
+    url,
+    source: 'bilibili',
+    bodyText: bodyPlainText
+  });
+
+  // 5.3 静态 HTML 备份
   let ossUrl = '';
   if (uploader) {
     try {
-      broadcastProgress('html', { progress: 60, message: '正在上传 HTML 备份...' });
-      updateProcessingState({ step: 'html', progress: 60 });
-      const htmlContent = generateBilibiliHtml(videoInfo, subtitleText, subtitleType, subtitleLang, coverOssUrl, url);
+      broadcastProgress('html', { progress: 80, message: '正在上传 HTML 备份...' });
+      updateProcessingState({ step: 'html', progress: 80 });
+      const htmlContent = generateBilibiliHtml(videoInfo, subtitleText, subtitleType, subtitleLang, coverOssUrl, url, aiResult.summary || aiResult.error);
       const htmlBlob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
       const dateStr = SlugUtil.todayStamp().replace(/-/g, '');
       ossUrl = await uploader.upload(htmlBlob, `bilibili/${dateStr}/${legacyFilename(videoInfo.title)}.html`, {
@@ -291,22 +463,8 @@ async function handleBilibiliWorkflow(payload) {
     }
   }
 
-  // 5.3 拼正文 markdown（封面 + 元数据 + 字幕全文）
+  // 5.4 拼正文 markdown（封面 + 元数据 + 字幕全文）
   const bodyMarkdown = bilibiliBodyMarkdown(videoInfo, subtitleText, subtitleType, subtitleLang, coverOssUrl);
-  const bodyPlainText = `视频标题：${videoInfo.title}\nUP 主：${videoInfo.owner?.name}\n时长：${formatVideoDuration(videoInfo.duration)}\n\n字幕原文：\n${subtitleText}`;
-
-  // 5.4 AI 总结
-  broadcastProgress('ai', { progress: 75, message: '正在生成 AI 总结...' });
-  updateProcessingState({ step: 'ai', progress: 75 });
-
-  const aiResult = await tryAiSummarize({
-    apiKey: settings.deepseek_api_key,
-    model: settings.deepseek_model,
-    title: videoInfo.title,
-    url,
-    source: 'bilibili',
-    bodyText: bodyPlainText
-  });
 
   // 5.5 md 拼装
   const md = MarkdownBuilder.build({
@@ -329,8 +487,8 @@ async function handleBilibiliWorkflow(payload) {
   });
 
   // 5.6 推 GitHub
-  broadcastProgress('github', { progress: 92, message: '正在推送到 GitHub...' });
-  updateProcessingState({ step: 'github', progress: 92 });
+  broadcastProgress('github', { progress: 95, message: '正在推送到 GitHub...' });
+  updateProcessingState({ step: 'github', progress: 95 });
 
   const filename = SlugUtil.buildFilename(videoInfo.title, 'md');
   const repoPath = joinPath(settings.github_path_media || 'reading/media', filename);
@@ -432,11 +590,25 @@ async function handlePdfWorkflow(payload) {
     'Content-Type': 'application/pdf'
   });
 
-  // 6.4 上传可读 HTML
+  // 6.4 AI 总结
+  broadcastProgress('ai', { progress: 65, message: '正在生成 AI 总结...' });
+  updateProcessingState({ step: 'ai', progress: 65 });
+  const aiResult = await tryAiSummarize({
+    apiKey: settings.deepseek_api_key,
+    model: settings.deepseek_model,
+    title,
+    url: original_url,
+    source: 'pdf',
+    bodyText: pdfText || `（PDF 文本提取失败，仅记录链接）`
+  });
+
+  // 6.5 上传可读 HTML
   let htmlOssUrl = '';
   if (pdfText.length > 0) {
     try {
-      const htmlContent = generatePdfHtml(title, pdfText, pageCount, pdfSize, original_url, pdfOssUrl);
+      broadcastProgress('html', { progress: 85, message: '正在上传 HTML 备份...' });
+      updateProcessingState({ step: 'html', progress: 85 });
+      const htmlContent = generatePdfHtml(title, pdfText, pageCount, pdfSize, original_url, pdfOssUrl, aiResult.summary || aiResult.error);
       const htmlBlob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
       htmlOssUrl = await uploader.upload(htmlBlob, `pdf/${dateStr}/${safeTitle}.html`, {
         'Cache-Control': 'public, max-age=31536000, immutable',
@@ -447,19 +619,7 @@ async function handlePdfWorkflow(payload) {
     }
   }
 
-  // 6.5 AI 总结
-  broadcastProgress('ai', { progress: 70, message: '正在生成 AI 总结...' });
-  updateProcessingState({ step: 'ai', progress: 70 });
-  const aiResult = await tryAiSummarize({
-    apiKey: settings.deepseek_api_key,
-    model: settings.deepseek_model,
-    title,
-    url: original_url,
-    source: 'pdf',
-    bodyText: pdfText || `（PDF 文本提取失败，仅记录链接）`
-  });
-
-  // 6.6 拼 md
+  // 6.6 拼装 md
   const sizeStr = pdfSize > 1024 * 1024
     ? `${(pdfSize / 1024 / 1024).toFixed(1)} MB`
     : `${(pdfSize / 1024).toFixed(0)} KB`;
@@ -486,8 +646,8 @@ async function handlePdfWorkflow(payload) {
   });
 
   // 6.7 推 GitHub
-  broadcastProgress('github', { progress: 92, message: '正在推送到 GitHub...' });
-  updateProcessingState({ step: 'github', progress: 92 });
+  broadcastProgress('github', { progress: 95, message: '正在推送到 GitHub...' });
+  updateProcessingState({ step: 'github', progress: 95 });
   const filename = SlugUtil.buildFilename(title, 'md');
   const repoPath = joinPath(settings.github_path_pdf || 'reading/articles', filename);
   const ghResult = await GitHubClient.commitFile({
@@ -750,7 +910,7 @@ async function extractPdfText(pdfBytes) {
 
 // ============ 11. HTML 静态备份生成 ============
 
-function generateStaticHtml(payload) {
+function generateStaticHtml(payload, aiSummary = '') {
   const css = `
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
     img { max-width: 100%; height: auto; border-radius: 4px; }
@@ -758,6 +918,8 @@ function generateStaticHtml(payload) {
     a:hover { text-decoration: underline; }
     h1 { font-size: 2em; margin-bottom: 0.5em; }
     .meta { color: #666; font-size: 0.9em; margin-bottom: 2em; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+    .ai-summary { background: #f0f7ff; border-left: 4px solid #007bff; padding: 16px 20px; margin: 20px 0 30px; border-radius: 0 8px 8px 0; font-style: italic; color: #444; }
+    .ai-summary h3 { margin: 0 0 10px 0; font-size: 1.1em; color: #007bff; font-style: normal; }
     blockquote { border-left: 4px solid #ddd; padding-left: 15px; color: #666; margin: 1.5em 0; }
     pre { background: #f5f5f5; padding: 15px; overflow-x: auto; border-radius: 4px; }
   `;
@@ -778,6 +940,7 @@ function generateStaticHtml(payload) {
       <a href="${escapeHtml(payload.original_url)}" target="_blank">原链接</a>
     </div>
   </header>
+  ${aiSummary ? `<div class="ai-summary"><h3>AI 速览</h3>${escapeHtml(aiSummary)}</div>` : ''}
   <article>${contentHtml}</article>
 </body>
 </html>`;
@@ -797,12 +960,14 @@ function nodesToHtml(nodes) {
   return `<${tag}${attrs}>${children}</${tag}>`;
 }
 
-function generateBilibiliHtml(videoInfo, subtitleText, subtitleType, subtitleLang, coverUrl, originalUrl) {
+function generateBilibiliHtml(videoInfo, subtitleText, subtitleType, subtitleLang, coverUrl, originalUrl, aiSummary = '') {
   const css = `
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.8; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background: #fafafa; }
     .video-header { background: linear-gradient(135deg, #00a1d6 0%, #6b4fbb 100%); color: white; padding: 30px; border-radius: 16px; margin-bottom: 30px; }
     .video-header h1 { font-size: 1.6em; margin: 0 0 15px; font-weight: 600; }
     .video-meta { display: flex; gap: 20px; font-size: 0.9em; opacity: 0.9; flex-wrap: wrap; }
+    .ai-summary { background: #f0f7ff; border-left: 4px solid #00a1d6; padding: 16px 20px; margin: 20px 0 30px; border-radius: 0 8px 8px 0; font-style: italic; color: #444; }
+    .ai-summary h3 { margin: 0 0 10px 0; font-size: 1.1em; color: #00a1d6; font-style: normal; }
     .cover-container { margin: 20px 0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
     .cover-container img { width: 100%; height: auto; display: block; }
     .subtitle-info { background: #f0f7ff; border-left: 4px solid #00a1d6; padding: 12px 16px; margin: 20px 0; border-radius: 0 8px 8px 0; font-size: 0.9em; color: #666; }
@@ -836,6 +1001,9 @@ function generateBilibiliHtml(videoInfo, subtitleText, subtitleType, subtitleLan
         <span>🔗 <a href="${escapeAttr(originalUrl)}" target="_blank" style="color: white;">原视频</a></span>
       </div>
     </header>
+
+    ${aiSummary ? `<div class="ai-summary"><h3>AI 速览</h3>${escapeHtml(aiSummary)}</div>` : ''}
+
     ${coverUrl ? `<div class="cover-container"><img src="${escapeAttr(coverUrl)}" alt="封面" /></div>` : ''}
     <div class="subtitle-info">📝 字幕来源：${subtitleTypeLabel}（${subtitleLang}）｜ 由 Read Clip 于 ${new Date().toLocaleString()} 提取</div>
     <section class="subtitle-content">${formattedSubtitle}</section>
@@ -844,7 +1012,7 @@ function generateBilibiliHtml(videoInfo, subtitleText, subtitleType, subtitleLan
 </html>`;
 }
 
-function generatePdfHtml(title, pdfText, pageCount, pdfSize, originalUrl, pdfOssUrl) {
+function generatePdfHtml(title, pdfText, pageCount, pdfSize, originalUrl, pdfOssUrl, aiSummary = '') {
   const sizeStr = pdfSize > 1024 * 1024
     ? `${(pdfSize / 1024 / 1024).toFixed(1)} MB`
     : `${(pdfSize / 1024).toFixed(0)} KB`;
@@ -862,6 +1030,8 @@ function generatePdfHtml(title, pdfText, pageCount, pdfSize, originalUrl, pdfOss
     .pdf-header h1 { font-size: 1.5em; margin: 0 0 12px; font-weight: 600; }
     .pdf-meta { display: flex; gap: 18px; font-size: 0.9em; opacity: 0.9; flex-wrap: wrap; }
     .pdf-meta a { color: #fff; text-decoration: underline; }
+    .ai-summary { background: #fff5f5; border-left: 4px solid #e74c3c; padding: 16px 20px; margin: 20px 0 30px; border-radius: 0 8px 8px 0; font-style: italic; color: #444; }
+    .ai-summary h3 { margin: 0 0 10px 0; font-size: 1.1em; color: #e74c3c; font-style: normal; }
     .content { background: #fff; padding: 28px; border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
     .content p { margin: 0.8em 0; line-height: 1.9; }
     a { color: #e74c3c; }
@@ -876,6 +1046,9 @@ function generatePdfHtml(title, pdfText, pageCount, pdfSize, originalUrl, pdfOss
         <span>🔗 <a href="${escapeAttr(pdfOssUrl)}">下载 PDF 原件</a></span>
       </div>
     </header>
+
+    ${aiSummary ? `<div class="ai-summary"><h3>AI 速览</h3>${escapeHtml(aiSummary)}</div>` : ''}
+
     <section class="content">${paragraphs}</section>
   </article>
 </body>
@@ -902,8 +1075,8 @@ function nodesToMarkdown(nodes) {
         case 'i': case 'em': md += `*${childrenMd}*`; break;
         case 'a': md += `[${childrenMd}](${node.attrs?.href || ''})`; break;
         case 'img': {
-          const src = node.attrs?.src || '';
-          const alt = node.attrs?.alt || 'image';
+          const src = (node.attrs?.src || '').replace(/[()]/g, s => s === '(' ? '%28' : '%29');
+          const alt = (node.attrs?.alt || 'image').replace(/[\[\]]/g, '\\$&');
           md += `\n\n![${alt}](${src})\n\n`;
           break;
         }

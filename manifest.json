@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Read Clip",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "网页/B站/PDF 剪藏 → DeepSeek 一段话总结 → md 推到 GitHub 个人阅读库。",
   "permissions": [
     "activeTab",

@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnOpenGitHub) {
     btnOpenGitHub.addEventListener('click', (e) => {
       e.stopPropagation();
-      const url = lastSuccessResult?.githubUrl || lastSuccessResult?.ossUrl;
+      const url = lastSuccessResult?.ossUrl || lastSuccessResult?.githubUrl;
       if (url) chrome.tabs.create({ url });
     });
   }
@@ -272,14 +272,14 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
       <div class="item-actions">
         <button class="action-btn open-gh" title="在 GitHub 查看">🐙</button>
-        <button class="action-btn copy" title="复制 md 路径">📋</button>
+        <button class="action-btn copy-oss" title="复制 OSS 链接">🔗</button>
         <button class="action-btn delete" title="从历史删除">✕</button>
       </div>
     `;
 
     li.addEventListener('click', (e) => {
       if (e.target.closest('.action-btn')) return;
-      const url = item.githubUrl || item.ossUrl || item.originalUrl;
+      const url = item.ossUrl || item.githubUrl || item.originalUrl;
       if (url) chrome.tabs.create({ url });
     });
 
@@ -288,13 +288,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (item.githubUrl) chrome.tabs.create({ url: item.githubUrl });
     });
 
-    li.querySelector('.copy')?.addEventListener('click', (e) => {
+    li.querySelector('.copy-oss')?.addEventListener('click', (e) => {
       e.stopPropagation();
-      const text = item.githubPath || item.githubUrl || '';
+      const text = item.ossUrl || item.githubUrl || '';
       if (text) {
         navigator.clipboard.writeText(text);
-        e.currentTarget.textContent = '✓';
-        setTimeout(() => { e.currentTarget.textContent = '📋'; }, 1500);
+        const btn = e.currentTarget;
+        const oldText = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => { btn.textContent = oldText; }, 1500);
       }
     });
 
