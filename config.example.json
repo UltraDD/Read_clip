@@ -1,0 +1,15 @@
+{
+  "github_owner": "UltraDD",
+  "github_repo": "My_life",
+  "github_branch": "main",
+  "github_token": "",
+  "github_path_article": "reading/articles",
+  "github_path_media": "reading/media",
+  "github_path_pdf": "reading/articles",
+  "deepseek_api_key": "",
+  "deepseek_model": "deepseek-v4-flash",
+  "oss_region": "oss-cn-guangzhou",
+  "oss_bucket": "read-clip",
+  "oss_ak": "",
+  "oss_sk": ""
+}

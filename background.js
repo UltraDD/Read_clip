@@ -19,6 +19,7 @@ importScripts(
   'lib/slug-util.js',
   'lib/markdown-builder.js',
   'lib/github-client.js',
+  'lib/history-sync.js',
   'lib/deepseek-client.js'
 );
 
@@ -132,114 +133,64 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 async function handleHistorySync() {
   const settings = await SecureSettings.requireSession();
-  const paths = [
-    settings.github_path_article || 'reading/articles',
-    settings.github_path_media || 'reading/media',
-    settings.github_path_pdf || 'reading/articles'
-  ];
-  const uniquePaths = [...new Set(paths)];
+  const uniquePaths = HistorySync.normalizeHistoryPaths(settings);
   
   const currentHistory = (await chrome.storage.local.get('history')).history || [];
-  const existingPaths = new Set(currentHistory.map(h => h.githubPath));
+  const existingPaths = new Set(currentHistory.map(h => h.githubPath).filter(Boolean));
   
-  let newEntriesCount = 0;
   const newEntries = [];
+  const githubOptions = {
+    owner: settings.github_owner,
+    repo: settings.github_repo,
+    branch: settings.github_branch || 'main',
+    token: settings.github_token
+  };
 
-  for (const path of uniquePaths) {
+  await logSystem('info', `开始同步 GitHub 历史: ${uniquePaths.join(', ')}`);
+  const files = await HistorySync.collectMarkdownFiles({
+    githubClient: GitHubClient,
+    githubOptions,
+    roots: uniquePaths,
+    maxFiles: HistorySync.DEFAULT_REMOTE_SCAN_LIMIT,
+    onError: async ({ path, error }) => {
+      console.warn(`获取路径列表失败 ${path}:`, error.message);
+      await logSystem('warn', `获取路径列表失败: ${path}`, error.message);
+    }
+  });
+
+  const toSync = files
+    .filter((file) => file && file.path && !existingPaths.has(file.path))
+    .slice(0, HistorySync.DEFAULT_HISTORY_LIMIT);
+
+  for (const file of toSync) {
     try {
-      logSystem('info', `正在同步 GitHub 路径: ${path}`);
-      const files = await GitHubClient.listDirectory({
-        owner: settings.github_owner,
-        repo: settings.github_repo,
-        branch: settings.github_branch || 'main',
-        token: settings.github_token,
-        path
+      const content = await GitHubClient.getFileContent({
+        ...githubOptions,
+        path: file.path
       });
 
-      // 仅处理 .md 文件且不在本地历史中的
-      const mdFiles = files.filter(f => f.name.endsWith('.md') && !existingPaths.has(f.path));
-      // 限制每次同步数量，避免请求过多
-      const toSync = mdFiles.slice(-20).reverse();
-
-      for (const file of toSync) {
-        try {
-          const content = await GitHubClient.getFileContent({
-            owner: settings.github_owner,
-            repo: settings.github_repo,
-            branch: settings.github_branch || 'main',
-            token: settings.github_token,
-            path: file.path
-          });
-
-          const entry = parseMarkdownEntry(content, file.path, file.html_url);
-          if (entry) {
-            newEntries.push(entry);
-            newEntriesCount++;
-          }
-        } catch (e) {
-          console.warn(`同步文件失败 ${file.path}:`, e.message);
-        }
+      const entry = HistorySync.parseMarkdownEntry(content, file.path, file.html_url);
+      if (entry) {
+        newEntries.push(entry);
+        existingPaths.add(file.path);
       }
     } catch (e) {
-      console.warn(`获取路径列表失败 ${path}:`, e.message);
+      console.warn(`同步文件失败 ${file.path}:`, e.message);
+      await logSystem('warn', `同步文件失败: ${file.path}`, e.message);
     }
   }
 
   if (newEntries.length > 0) {
-    const updatedHistory = [...currentHistory, ...newEntries];
-    // 按时间戳排序
-    updatedHistory.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-    // 保持最大数量
-    const trimmedHistory = updatedHistory.slice(-200);
+    const trimmedHistory = HistorySync.mergeHistory(
+      currentHistory,
+      newEntries,
+      HistorySync.DEFAULT_HISTORY_LIMIT
+    );
     await chrome.storage.local.set({ history: trimmedHistory });
   }
 
-  return newEntriesCount;
-}
-
-function parseMarkdownEntry(content, repoPath, githubUrl) {
-  // 简单的 frontmatter 解析
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!fmMatch) return null;
-
-  const fmText = fmMatch[1];
-  const getFmValue = (key) => {
-    const m = fmText.match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
-    if (!m) return '';
-    let val = m[1].trim();
-    if (val.startsWith('"') && val.endsWith('"')) {
-      val = val.slice(1, -1).replace(/\\"/g, '"').replace(/\\n/g, '\n');
-    }
-    return val;
-  };
-
-  const title = getFmValue('title');
-  const originalUrl = getFmValue('url');
-  const capturedAt = getFmValue('captured_at');
-  const ossUrl = getFmValue('oss_html');
-  const source = getFmValue('source');
-  
-  // 查找 AI 速览部分
-  let aiSummary = '';
-  const aiMatch = content.match(/## AI 速览\n\n([\s\S]*?)\n\n---/);
-  if (aiMatch) {
-    aiSummary = aiMatch[1].trim();
-    if (aiSummary.startsWith('>')) aiSummary = ''; // 过滤掉失败标注
-  }
-
-  const timestamp = capturedAt ? new Date(capturedAt).getTime() : Date.now();
-
-  return {
-    title: title || repoPath.split('/').pop().replace('.md', ''),
-    originalUrl,
-    ossUrl,
-    githubUrl,
-    githubPath: repoPath,
-    timestamp,
-    type: repoPath.includes('media') ? 'bilibili' : (repoPath.includes('pdf') ? 'pdf' : 'article'),
-    aiSummary: aiSummary || null,
-    source: source || null
-  };
+  await logSystem('info', `GitHub 历史同步完成，新增 ${newEntries.length} 条`, { scanned: files.length });
+  return newEntries.length;
 }
 
 function broadcastProgress(step, data) {

@@ -337,7 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       btnSyncHistory.disabled = true;
       btnSyncHistory.textContent = '同步中...';
-      log('开始从 GitHub 同步最近 20 条记录...');
+      log('开始从 GitHub 同步最近 200 条记录...');
       
       chrome.runtime.sendMessage({ action: 'sync_github_history' }, (response) => {
         btnSyncHistory.disabled = false;

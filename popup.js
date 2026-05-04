@@ -229,7 +229,10 @@ document.addEventListener('DOMContentLoaded', () => {
           <li class="empty-state">
             <div class="empty-icon">📭</div>
             <p>暂无记录</p>
+            <button class="sync-history-btn">同步 GitHub 历史</button>
+            <p class="empty-hint">换设备后可从已入库的 md 恢复最近历史</p>
           </li>`;
+        historyList.querySelector('.sync-history-btn')?.addEventListener('click', syncGithubHistory);
         return;
       }
       for (const item of history) {
@@ -309,6 +312,37 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     return li;
+  }
+
+  function syncGithubHistory(e) {
+    const button = e.currentTarget;
+    const item = button.closest('.empty-state');
+    const hint = item?.querySelector('.empty-hint');
+    button.disabled = true;
+    button.textContent = '同步中...';
+    if (hint) hint.textContent = '正在从 GitHub 扫描剪藏记录';
+
+    chrome.runtime.sendMessage({ action: 'sync_github_history' }, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      button.disabled = false;
+      button.textContent = '同步 GitHub 历史';
+
+      if (runtimeError) {
+        if (hint) hint.textContent = runtimeError.message || '同步失败';
+        return;
+      }
+
+      if (response && response.success) {
+        if (response.count > 0) {
+          if (hint) hint.textContent = `已恢复 ${response.count} 条记录`;
+          loadHistory();
+        } else if (hint) {
+          hint.textContent = 'GitHub 暂无可恢复的新记录';
+        }
+      } else if (hint) {
+        hint.textContent = response?.error || '同步失败，请到管理后台检查配置';
+      }
+    });
   }
 
   function escapeHtml(s) {
