@@ -63,7 +63,7 @@ Read Clip 是一个 Chrome Manifest V3 扩展，用来把网页、B 站视频字
 打开 chrome://extensions
 开启 Developer mode
 Load unpacked
-选择 apps/Read_clip 目录
+选择 apps/read-clip 目录
 ```
 
 调试入口：
